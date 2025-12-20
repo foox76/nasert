@@ -1,53 +1,28 @@
--- Enable UUID extension
-create extension if not exists "uuid-ossp";
-
--- Clients Table
-create table clients (
-  id uuid default uuid_generate_v4() primary key,
+-- Create the inventory table
+create table inventory (
+  id uuid default gen_random_uuid() primary key,
   name text not null,
-  address text,
-  contact_person text,
-  email text,
-  current_balance decimal(10, 2) default 0.00,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+  category text null,
+  stock integer default 0,
+  unit text null,
+  min_level integer default 0,
+  status text null, -- 'good', 'low', 'critical'
+  created_at timestamptz default now()
 );
 
--- Products Table
-create table products (
-  id uuid default uuid_generate_v4() primary key,
-  name text not null,
-  unit_price decimal(10, 2) not null,
-  image_url text,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
+-- Enable Row Level Security (RLS) is good practice, but for starting out we can allow public access if you want, 
+-- or better: allow access to authenticated users. 
+-- For now, to match your keys (anon), we'll create a policy that allows everything for anon (public) users
+-- CAUTION: This makes your DB public. Ideally you'd want auth.
+alter table inventory enable row level security;
 
--- Inventory Locations Table (Links Clients to Products, tracks stock at specific shop)
-create table inventory_locations (
-  id uuid default uuid_generate_v4() primary key,
-  client_id uuid references clients(id) on delete cascade not null,
-  product_id uuid references products(id) on delete cascade not null,
-  current_stock_count integer default 0,
-  last_updated timestamp with time zone default timezone('utc'::text, now()) not null,
-  unique(client_id, product_id)
-);
+create policy "Enable all access for all users" on inventory
+for all using (true) with check (true);
 
--- Visits/Transactions Table
-create table visits (
-  id uuid default uuid_generate_v4() primary key,
-  client_id uuid references clients(id) on delete cascade not null,
-  visit_date timestamp with time zone default timezone('utc'::text, now()) not null,
-  total_due decimal(10, 2) default 0.00,
-  notes text,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
--- Visit Items Table (To track details of each visit per product if needed, though prompt implied simple logic, let's make it robust)
-create table visit_items (
-  id uuid default uuid_generate_v4() primary key,
-  visit_id uuid references visits(id) on delete cascade not null,
-  product_id uuid references products(id) on delete cascade not null,
-  items_sold integer not null,
-  restock_amount integer not null,
-  unit_price_at_sale decimal(10, 2) not null, -- Store price at time of sale in case it changes
-  total_cost decimal(10, 2) generated always as (items_sold * unit_price_at_sale) stored
-);
+-- Insert some dummy data to match what you had
+insert into inventory (name, category, stock, unit, min_level, status) values
+  ('Premium Matcha Powder', 'Raw Material', 45, 'kg', 10, 'good'),
+  ('Latte Mix Base', 'Raw Material', 8, 'bags', 15, 'low'),
+  ('Takeaway Cups (12oz)', 'Packaging', 1200, 'pcs', 500, 'good'),
+  ('Bamboo Whisks', 'Equipment', 3, 'pcs', 5, 'critical'),
+  ('Sugar Syrup', 'Raw Material', 20, 'bottles', 10, 'good');

@@ -1,26 +1,101 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    /* "Vibrant Matcha Waves" Theme */
+
+    /* Background: Soft Mint to define the 'canvas' vs 'cards' */
+    --background: 150 30% 96%;
+    --foreground: 160 30% 10%;
+
+    /* Cards: Pure White to POP against Mint BG */
+    --card: 0 0% 100%;
+    --card-foreground: 160 30% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 160 30% 10%;
+
+    /* Primary: Deep Jungle Green for text/buttons */
+    --primary: 150 100% 30%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary: Light Mint for pills */
+    --secondary: 150 40% 90%;
+    --secondary-foreground: 150 100% 30%;
+
+    --muted: 150 20% 94%;
+    --muted-foreground: 160 5% 40%;
+
+    --accent: 150 60% 85%;
+    --accent-foreground: 160 40% 15%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    /* Borders: Visible but soft green */
+    --border: 150 20% 88%;
+    --input: 150 20% 92%;
+    /* Inputs slightly darker than card */
+    --ring: 150 70% 40%;
+
+    /* Super Round Corners per User Request */
+    --radius: 2rem;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  body {
+    /* Main Background: Gradient to avoid "just white" look */
+    background: linear-gradient(180deg, #e6f7ef 0%, #f0fdf4 100%);
+    color: hsl(var(--foreground));
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Deep shadows for popping white cards off mint bg */
+  .shadow-polish-sm {
+    box-shadow: 0 2px 8px rgba(20, 83, 45, 0.08);
+  }
+
+  .shadow-polish-md {
+    box-shadow:
+      0 10px 30px -5px rgba(22, 101, 52, 0.1),
+      0 4px 10px -3px rgba(0, 0, 0, 0.05);
+  }
+
+  .shadow-float {
+    box-shadow:
+      0 20px 40px -8px rgba(22, 163, 74, 0.15),
+      0 12px 20px -8px rgba(0, 0, 0, 0.05);
+  }
+
+  .glass-card {
+    /* Less transparent, more solid to define boundaries */
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 1);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.05);
+  }
+
+  .font-serif {
+    font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  }
+
+  /* Curved background shape utility */
+  .bg-curve-header {
+    background: linear-gradient(135deg, #166534 0%, #15803d 100%);
+    border-bottom-left-radius: 3rem;
+    border-bottom-right-radius: 3rem;
+  }
 }
