@@ -266,7 +266,7 @@ export default function ProductsPage() {
                                                 <MoreVertical className="h-4 w-4" />
                                             </Button>
                                         </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end" className="rounded-xl" dir="rtl">
+                                        <DropdownMenuContent align="end" className="rounded-xl">
                                             <DropdownMenuItem onClick={() => openEdit(product)} className="gap-2 p-2.5 cursor-pointer text-right">
                                                 <Pencil className="h-4 w-4 text-gray-500" /> تعديل
                                             </DropdownMenuItem>
