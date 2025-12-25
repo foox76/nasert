@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { ChevronRight, Share2, Plus, Minus, History, ClipboardList, PenLine, Save, ArrowRight } from 'lucide-react'
@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/hooks/use-toast"
 import { Toaster } from "@/components/ui/toaster"
 import { supabase } from '@/lib/supabaseClient'
+import { InvoiceTemplate } from '@/components/InvoiceTemplate'
 
 export default function VisitPage() {
     const params = useParams()
@@ -41,6 +42,7 @@ export default function VisitPage() {
     const [notes, setNotes] = useState('')
     const [isSubmitOpen, setIsSubmitOpen] = useState(false)
     const [loading, setLoading] = useState(true)
+    const invoiceRef = useRef<HTMLDivElement>(null)
 
     // Load Data
     useEffect(() => {
@@ -62,16 +64,52 @@ export default function VisitPage() {
     }
 
     const fetchProducts = async () => {
-        // Fetch inventory items to sell/restock
-        const { data, error } = await supabase
+        // 1. Fetch inventory items
+        const { data: inventoryData, error: inventoryError } = await supabase
             .from('inventory')
             .select('*')
             .order('name')
-        if (!error && data) {
-            // Add 'expected' property for UI logic (default 0 for new visit)
-            // In a real advanced app, we would look up the LAST visit's stock for this client
-            setProducts(data.map(p => ({ ...p, expected: 0 })))
+
+        if (inventoryError || !inventoryData) {
+            console.error('Error fetching inventory:', inventoryError)
+            return
         }
+
+        // 2. Fetch the LAST visit for this client
+        const { data: lastVisitData, error: lastVisitError } = await supabase
+            .from('visits')
+            .select('id')
+            .eq('client_id', clientId)
+            .order('visit_date', { ascending: false })
+            .limit(1)
+            .single()
+
+        let lastVisitItems: any[] = []
+
+        if (!lastVisitError && lastVisitData) {
+            // 3. Fetch items from that last visit
+            const { data: itemsData, error: itemsError } = await supabase
+                .from('visit_items')
+                .select('*')
+                .eq('visit_id', lastVisitData.id)
+
+            if (!itemsError && itemsData) {
+                lastVisitItems = itemsData
+            }
+        }
+
+        // 4. Merge data
+        const mergedProducts = inventoryData.map(p => {
+            const lastItem = lastVisitItems.find(item => item.product_id === p.id)
+            // Expected = Last Actual + Last Restock. Default to 0 if no history.
+            const expected = lastItem ? (lastItem.actual_qty + lastItem.restock_qty) : 0
+            return {
+                ...p,
+                expected: expected
+            }
+        })
+
+        setProducts(mergedProducts)
     }
 
     const fetchHistory = async () => {
@@ -86,37 +124,23 @@ export default function VisitPage() {
 
     // Calculations
     const getSoldQty = (pId: string, expected: number) => {
-        // Simple logic: If we expected 10 and count 5 -> Sold 5.
-        // For now, since we don't track 'expected' per client perfectly yet,
-        // we can assume 'expected' is what they SHOULD have, but if it starts at 0, this logic is tricky.
-        // simplified workflow: User just enters "Sold" or "Restock" directly?
-        // OR: User enters "Count (Actual)". If Expected=0, then Sold=0.
-
-        // Let's stick to the UI: User enters "Actual". 
-        // If we don't know expected, we can't calc sold automatically unless user updates expected.
-        // For this V1, let's assume 'expected' is 0, so 'sold' is 0 unless we manually override?
-        // Actually, let's change the logic slightly for usability:
-        // Audit Tab: "Previous Stock" (Expected) vs "Current Count" (Actual) -> Sold
-        // Since we don't have previous stock yet, let's just allow them to input "Sold" directly?
-        // No, the UI shows "Actual".
-
-        // Temporary fix: Expected is 0. If Actual is entered, we just record Actual.
-        // Sold = Expected - Actual. If Expected < Actual, maybe they bought from elsewhere?
-
-        const actual = parseInt(counts[pId] || '')
+        const val = counts[pId]
+        if (val === undefined || val === '') return 0
+        const actual = parseInt(val)
         if (isNaN(actual)) return 0
         return Math.max(0, expected - actual)
     }
 
     const getRestockQty = (pId: string) => {
-        const qty = parseInt(restocks[pId] || '0')
+        const val = restocks[pId]
+        if (!val) return 0
+        const qty = parseInt(val)
         return isNaN(qty) ? 0 : qty
     }
 
     const getTotalDue = () => {
         let total = 0
         products.forEach(p => {
-            // Price check
             const price = p.price || 0
             const sold = getSoldQty(p.id, p.expected)
             total += sold * price
@@ -160,17 +184,23 @@ export default function VisitPage() {
             // 2. Create Visit Items
             const visitItems = products
                 .map(p => {
-                    const actual = parseInt(counts[p.id] || '0')
-                    const restock = parseInt(restocks[p.id] || '0')
-                    const sold = getSoldQty(p.id, p.expected)
+                    const countInput = counts[p.id]
+                    const restock = getRestockQty(p.id)
 
-                    if (actual === 0 && restock === 0 && sold === 0) return null
+                    // Logic: If user didn't enter an actual count, assume nothing sold (Actual = Expected)
+                    const actualStock = (countInput === undefined || countInput === '')
+                        ? p.expected
+                        : parseInt(countInput)
+
+                    const sold = Math.max(0, p.expected - actualStock)
+
+                    if (countInput === '' && restock === 0 && sold === 0) return null
 
                     return {
                         visit_id: visitId,
                         product_id: p.id,
                         expected_qty: p.expected,
-                        actual_qty: actual,
+                        actual_qty: actualStock,
                         restock_qty: restock,
                         sold_qty: sold
                     }
@@ -198,6 +228,22 @@ export default function VisitPage() {
 
             // Refresh history
             fetchHistory()
+
+            // REAL-TIME UPDATE: 
+            // Update local products state so 'expected' reflects what we just saved.
+            // This allows the user to see the "New Total" as the new "Current" stock immediately.
+            setProducts(prevProducts => prevProducts.map(p => {
+                const item = visitItems.find(vi => vi?.product_id === p.id)
+                if (item) {
+                    return { ...p, expected: item.actual_qty! + item.restock_qty! }
+                }
+                return p
+            }))
+
+            // Reset inputs for the "next" possible interaction on this profile
+            setCounts({})
+            setRestocks({})
+            setNotes('')
             setIsSubmitOpen(false)
 
         } catch (error) {
@@ -211,19 +257,31 @@ export default function VisitPage() {
     }
 
     const handleInvoice = async () => {
-        // Save first
-        await handleSaveVisit()
+        if (!invoiceRef.current) return
 
-        // Then generate PDF
-        const items = getReviewItems()
-        const invoiceData = {
-            clientName: client?.name || 'Client',
-            date: new Date().toLocaleDateString('en-US'),
-            items: items,
-            totalDue: getTotalDue(),
-            notes: notes
+        try {
+            toast({
+                title: "Generating Invoice...",
+                description: "Creating your professional PDF. Please wait.",
+                className: "bg-blue-600 text-white rounded-2xl"
+            })
+
+            const fileName = `Invoice_${client?.name.replace(/\s+/g, '_') || 'Client'}_${new Date().toLocaleDateString('en-GB').replace(/\//g, '-')}`
+
+            // Execute invoice generation first while data is still in state
+            await generateInvoice(invoiceRef.current, fileName)
+
+            // Then save the visit (which clears state and refreshes history)
+            await handleSaveVisit()
+
+        } catch (error) {
+            console.error('Invoice generation failed:', error)
+            toast({
+                title: "Download Failed",
+                description: "We couldn't generate the PDF. Please try again.",
+                variant: "destructive"
+            })
         }
-        await generateInvoice(invoiceData)
     }
 
     if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-400">تحميل...</div>
@@ -312,27 +370,44 @@ export default function VisitPage() {
                                         <span className="font-bold text-lg text-gray-900 block mb-1">{p.name}</span>
                                         <span className="text-sm text-gray-400 font-bold bg-gray-100 px-2 py-1 rounded-lg">الحالي: {p.expected} وحدة</span>
                                     </div>
-                                    <div className="flex items-center gap-3 bg-gray-50 p-1.5 rounded-2xl">
-                                        <Button size="icon" variant="ghost" className="h-10 w-10 rounded-xl hover:bg-white hover:text-red-500 text-gray-400" onClick={() => {
-                                            const curr = parseInt(restocks[p.id] || '0')
-                                            if (curr > 0) setRestocks({ ...restocks, [p.id]: (curr - 1).toString() })
-                                        }}>
-                                            <Minus className="h-5 w-5" />
-                                        </Button>
-                                        <Input
-                                            className="h-10 w-16 text-center border-none bg-white rounded-xl font-bold text-lg shadow-sm"
-                                            type="number"
-                                            inputMode="numeric"
-                                            value={restocks[p.id] || ''}
-                                            placeholder="0"
-                                            onChange={(e) => setRestocks({ ...restocks, [p.id]: e.target.value })}
-                                        />
-                                        <Button size="icon" variant="ghost" className="h-10 w-10 rounded-xl hover:bg-white hover:text-green-600 text-gray-400" onClick={() => {
-                                            const curr = parseInt(restocks[p.id] || '0') || 0
-                                            setRestocks({ ...restocks, [p.id]: (curr + 1).toString() })
-                                        }}>
-                                            <Plus className="h-5 w-5" />
-                                        </Button>
+                                    <div className="flex flex-col items-end gap-2">
+                                        <div className="flex items-center gap-3 bg-gray-50 p-1.5 rounded-2xl">
+                                            <Button size="icon" variant="ghost" className="h-10 w-10 rounded-xl hover:bg-white hover:text-red-500 text-gray-400" onClick={() => {
+                                                const curr = getRestockQty(p.id)
+                                                setRestocks({ ...restocks, [p.id]: (curr - 1).toString() })
+                                            }}>
+                                                <Minus className="h-5 w-5" />
+                                            </Button>
+                                            <Input
+                                                className="h-10 w-16 text-center border-none bg-white rounded-xl font-bold text-lg shadow-sm"
+                                                type="number"
+                                                inputMode="numeric"
+                                                value={restocks[p.id] || ''}
+                                                placeholder="0"
+                                                onChange={(e) => setRestocks({ ...restocks, [p.id]: e.target.value })}
+                                            />
+                                            <Button size="icon" variant="ghost" className="h-10 w-10 rounded-xl hover:bg-white hover:text-green-600 text-gray-400" onClick={() => {
+                                                const curr = getRestockQty(p.id)
+                                                setRestocks({ ...restocks, [p.id]: (curr + 1).toString() })
+                                            }}>
+                                                <Plus className="h-5 w-5" />
+                                            </Button>
+                                        </div>
+                                        {/* New Total Preview */}
+                                        <div className="text-left">
+                                            {(() => {
+                                                const base = counts[p.id] === undefined || counts[p.id] === '' ? p.expected : parseInt(counts[p.id])
+                                                const restock = getRestockQty(p.id)
+                                                if (restock !== 0) {
+                                                    return (
+                                                        <p className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                                                            {base} (Current) + {restock} (Adjustment) = {base + restock} Total
+                                                        </p>
+                                                    )
+                                                }
+                                                return null
+                                            })()}
+                                        </div>
                                     </div>
                                 </div>
                             </Card>
@@ -432,6 +507,26 @@ export default function VisitPage() {
                 </Drawer>
             </div>
 
+            {/* Hidden Invoice Template for PDF generation */}
+            <div className="fixed -left-[2000px] top-0">
+                <div ref={invoiceRef}>
+                    <InvoiceTemplate
+                        data={{
+                            clientName: client?.name || 'Client',
+                            date: new Date().toLocaleDateString('en-GB'),
+                            invoiceNumber: `INV-${Date.now().toString().slice(-6)}`,
+                            items: getReviewItems().map(item => ({
+                                name: item.name,
+                                qty: item.qty,
+                                price: item.price,
+                                total: item.total
+                            })),
+                            totalDue: getTotalDue(),
+                            notes: notes
+                        }}
+                    />
+                </div>
+            </div>
         </div>
     )
 }

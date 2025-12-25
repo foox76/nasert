@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
-import { Search, MapPin, ChevronLeft, Plus, Phone, MessageCircle, Clock, Package, Filter, Check, Navigation, Edit, Map } from 'lucide-react'
+import { Search, MapPin, ChevronLeft, Plus, Phone, MessageCircle, Clock, Package, Filter, Check, Navigation, Edit, Map, Trash2 } from 'lucide-react'
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -86,6 +86,19 @@ export default function ClientList() {
         if (diffDays < 30) return `منذ ${diffDays} يوم`
         const diffMonths = Math.floor(diffDays / 30)
         return `منذ ${diffMonths} شهر`
+    }
+
+    const normalizePhone = (phone: string) => {
+        if (!phone) return ''
+        // 1. Convert Arabic/Persian digits to Western
+        const arabicDigits = /[٠١٢٣٤٥٦٧٨٩]/g;
+        const persianDigits = /[۰۱۲۳۴۵۶۷۸۹]/g;
+        let normalized = phone
+            .replace(arabicDigits, (d) => (d.charCodeAt(0) - 1632).toString())
+            .replace(persianDigits, (d) => (d.charCodeAt(0) - 1776).toString());
+
+        // 2. Remove all non-numeric characters for WhatsApp
+        return normalized.replace(/\D/g, '')
     }
 
     // Dynamic Location List for Filter
@@ -174,6 +187,23 @@ export default function ClientList() {
         }
     }
 
+    const handleDelete = async (id: string) => {
+        if (!window.confirm('هل أنت متأكد من حذف هذا المقهى؟ سيتم حذف جميع سجلات الزيارات المتعلقة به.')) return
+
+        try {
+            const { error } = await supabase
+                .from('clients')
+                .delete()
+                .eq('id', id)
+
+            if (error) throw error
+
+            setClients(clients.filter(c => c.id !== id))
+        } catch (error) {
+            console.error('Error deleting client:', error)
+        }
+    }
+
     return (
         <div className="min-h-screen pb-32" dir="rtl">
 
@@ -232,6 +262,7 @@ export default function ClientList() {
                                     id="phone"
                                     placeholder="مثال: 99123456"
                                     className="h-14 bg-gray-100 border-transparent focus:bg-white transition-all rounded-2xl text-right"
+                                    style={{ direction: 'ltr' }}
                                     value={formData.phone}
                                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                                 />
@@ -333,6 +364,9 @@ export default function ClientList() {
                                             <Button size="icon" variant="ghost" className="h-10 w-10 text-gray-300 hover:text-green-600 hover:bg-green-50 rounded-full" onClick={() => handleEdit(client)}>
                                                 <Edit className="h-5 w-5" />
                                             </Button>
+                                            <Button size="icon" variant="ghost" className="h-10 w-10 text-gray-300 hover:text-red-600 hover:bg-red-50 rounded-full" onClick={() => handleDelete(client.id)}>
+                                                <Trash2 className="h-5 w-5" />
+                                            </Button>
                                         </div>
                                     </div>
 
@@ -364,7 +398,7 @@ export default function ClientList() {
                                             </a>
                                         </Button>
                                         <Button className="flex-1 h-14 rounded-2xl bg-gray-900 hover:bg-black text-green-400 font-bold text-lg shadow-lg active:scale-95 transition-all" asChild>
-                                            <a href={`https://wa.me/${client.phone}`} target="_blank" rel="noopener noreferrer">
+                                            <a href={`https://wa.me/${normalizePhone(client.phone)}`} target="_blank" rel="noopener noreferrer">
                                                 <MessageCircle className="h-5 w-5 ml-2 fill-current" />
                                                 واتساب
                                             </a>
